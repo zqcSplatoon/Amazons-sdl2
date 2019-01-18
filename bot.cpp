@@ -3,7 +3,7 @@
  * Description: 
  * Author: zhaoqiaochu
  * Created_Time: 2018-11-28 10:43:37 AM
- * Last modified: 2018-12-23 11:45:09 AM
+ * Last modified: 2019-01-12 08:16:49 AM
  ************************************************************************/
 #include "all.h"
 #include <stdio.h>
@@ -16,7 +16,7 @@ extern int dx[];
 extern int dy[];
 static int myPos[4][2];
 static int yourPos[4][2];
-static int** board;
+static int board[L][L];
 static int boardCopy[L][L];
 static int myColor;
 static int botColor;
@@ -71,7 +71,7 @@ int countRealm(int x, int y, int board[L][L])
     if (board[x][y] == myColor) {
         return -countLiberty(x, y, 1);
     }
-    int ans = 0;
+    int ans = 1;
     for (int i = 0; i < 8; i++) {
         board[x][y] = BLOCK;
         ans += countRealm(x + dx[i], y + dy[i], board);
@@ -89,11 +89,11 @@ int countScore(int board[L][L])
     return score;
 }
 
-MOVE bot(int** getboard, int getbotColor, int getmyColor)
+MOVE bot(int getboard[L][L], int getbotColor, int getmyColor)
 {
     botColor = getbotColor;
     myColor = getmyColor;
-    board = getboard;
+    memcpy(board, getboard, sizeof(board));
     int startX = 0, startY = 0, resultX = 0, resultY = 0, BLOCKX = 0, BLOCKY = 0;
     for (int i = 0, t_me = 0, t_you = 0; i < L; i++) {
         for (int j = 0; j < L; j++) {

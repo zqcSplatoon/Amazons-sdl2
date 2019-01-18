@@ -3,7 +3,7 @@
  * Description: 
  * Author: zhaoqiaochu
  * Created_Time: 2018-11-21 04:22:00 PM
- * Last modified: 2018-12-23 02:14:18 PM
+ * Last modified: 2019-01-12 08:40:04 AM
  ************************************************************************/
 #include "all.h"
 #include <stdio.h>
@@ -14,8 +14,13 @@
 static POS myPos[4];
 extern int dx[];
 extern int dy[];
-static int** map;
-extern int inMap(int x, int y);
+static int map[L][L];
+static inline int inMap(int x, int y)
+{
+    if (x < 0 || y < 0 || x >= L || y >= L)
+        return 0;
+    return 1;
+}
 
 static int isBlocked(int x, int y)
 {
@@ -61,9 +66,9 @@ static int isBlocked(int x, int y)
 //    return 0;
 //}
 
-int judge_is_over(int** m, int color)
+int judge_is_over(int boardCopy[L][L], int color)
 {
-    map = m;
+    memcpy(map, boardCopy, sizeof(map));
     for (int i = 0, t = 0; i < L; i++)
         for (int j = 0; j < L; j++) {
             if (map[i][j] == color) {

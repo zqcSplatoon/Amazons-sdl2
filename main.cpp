@@ -3,15 +3,13 @@
  * Description: 
  * Author: zhaoqiaochu
  * Created_Time: 2018-12-19 04:43:17 PM
- * Last modified: 2018-12-30 11:35:35 AM
+ * Last modified: 2019-01-12 09:18:39 PM
  ************************************************************************/
 #include "all.h"
 #include "bot.h"
 #include "judge.h"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
-#include <SDL2/SDL_mixer.h>
-#include <SDL2/SDL_ttf.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,19 +21,20 @@
 #define PIECE 100
 BoardStat myColor = (BoardStat)-1;
 BoardStat botColor = (BoardStat)(-1);
+int boardCopy[L][L];
 
-inline int inMap(int x, int y)
+static inline int inMap(int x, int y)
 {
     if (x < 0 || y < 0 || x >= L || y >= L)
         return 0;
     return 1;
 }
 struct t {
-    int turn;
     int color;
     MOVE m;
 };
-struct t allMove[1000], *currMove;
+struct t allMove[1000];
+int allTurns = 0, currTurn = 0;
 
 int dx[] = { -1, -1, -1, 0, 0, 1, 1, 1 };
 int dy[] = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -44,11 +43,11 @@ SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 SDL_Texture* output;
 SDL_Thread* calthread = NULL;
-char message[100];
 void winner(BoardStat color);
 int cal(void* data);
 
-typedef struct {
+//texture struct
+typedef struct { /*{{{*/
     SDL_Texture* texture;
     void Load(const char* path)
     {
@@ -72,11 +71,12 @@ typedef struct {
     {
         SDL_DestroyTexture(texture);
     }
-} LTexture;
+} LTexture; /*}}}*/
 //pieces
 LTexture background, white, black, block, movable, blockable;
 
-typedef struct {
+//button struct
+typedef struct { /*{{{*/
     bool enable = true;
     bool show = true;
     bool isClicked = false;
@@ -146,10 +146,11 @@ typedef struct {
             return;
         tex[currTexture].Render(x, y, w, h);
     }
-} Button;
-Button start, save, load, exitGame, replay_back, replay_forward, replay_start, replay_end;
+} Button; /*}}}*/
+Button start, save, load, abortGame, exitGame, replay_back, replay_forward, replay_start, replay_end;
 
-typedef struct {
+//board struct
+typedef struct { /*{{{*/
     LTexture tex;
     bool enable = true;
     bool hasPiece = false;
@@ -158,22 +159,23 @@ typedef struct {
     POS to;
     int x = 10, y = 10, w = L * PIECE, h = L * PIECE;
     BoardStat m[L][L] = {};
-    int** getState()
+    void getState(int copyTo[L][L])
     {
-        int** state = NULL;
-        state = (int**)malloc(L * sizeof(int*));
-        for (int i = 0; i < L; i++)
-            state[i] = (int*)malloc(L * sizeof(int));
         for (int i = 0; i < L; i++)
             for (int j = 0; j < L; j++)
-                state[i][j] = (int)m[i][j];
-        return state;
+                copyTo[i][j] = (int)m[i][j];
     }
     void move(MOVE oneMove, BoardStat color)
     {
         m[oneMove.from.x][oneMove.from.y] = VACANT;
         m[oneMove.to.x][oneMove.to.y] = color;
         m[oneMove.block.x][oneMove.block.y] = BLOCK;
+    }
+    void undoMove(MOVE oneMove, BoardStat color)
+    {
+        m[oneMove.to.x][oneMove.to.y] = VACANT;
+        m[oneMove.block.x][oneMove.block.y] = VACANT;
+        m[oneMove.from.x][oneMove.from.y] = color;
     }
     void spread(int x, int y, BoardStat stat)
     {
@@ -201,9 +203,9 @@ typedef struct {
     }
     void Init()
     {
-        //m[0][0] = BLOCK;
-        //m[1][1] = canMOVE;
-        //m[2][2] = canBLOCK;
+        for (int i = 0; i < L; i++)
+            for (int j = 0; j < L; j++)
+                m[i][j] = VACANT;
         m[0][(L - 1) / 3] = m[(L - 1) / 3][0]
             = m[L - 1 - ((L - 1) / 3)][0]
             = m[L - 1][(L - 1) / 3] = BLACK;
@@ -237,22 +239,20 @@ typedef struct {
                     printf("User's move:%d %d; %d %d; %d %d\n",
                         mv.from.x, mv.from.y, mv.to.x, mv.to.y, mv.block.x, mv.block.y);
                     move(mv, (BoardStat)myColor);
-                    allMove[currMove->turn + 1].m = mv;
-                    allMove[currMove->turn + 1].color = myColor;
-                    allMove[currMove->turn + 1].turn = currMove->turn + 1;
-                    currMove = allMove + currMove->turn + 1;
+                    currTurn++;
+                    allMove[currTurn].m = mv;
+                    allMove[currTurn].color = myColor;
                     for (int i = 0; i < L; i++)
                         for (int j = 0; j < L; j++) {
                             if (m[i][j] == canBLOCK)
                                 m[i][j] = VACANT;
                         }
-                    int** boardCopy = getState();
+                    getState(boardCopy);
                     if (judge_is_over(boardCopy, (int)botColor)) {
                         winner((myColor));
                     } else {
                         calthread = SDL_CreateThread(cal, "thread", (void*)NULL);
                     }
-                    free(boardCopy);
                 } else {
                     m[start.x][start.y] = myColor;
                 }
@@ -306,12 +306,12 @@ typedef struct {
                     blockable.Render(x + PIECE * i, y + PIECE * j, PIECE, PIECE);
                 }
     }
-} Board;
+} Board; /*}}}*/
 Board board;
 
 int init()
 {
-    if (SDL_Init(SDL_INIT_EVERYTHING) == -1)
+    if (SDL_Init(SDL_INIT_EVERYTHING) == -1) /*{{{*/
         return -1;
     IMG_Init(IMG_INIT_PNG);
     window = SDL_CreateWindow("Amazons",
@@ -320,16 +320,15 @@ int init()
         WindowW, WindowH, SDL_WINDOW_SHOWN);
     renderer = SDL_CreateRenderer(window, -1,
         SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED | SDL_RENDERER_TARGETTEXTURE);
-    allMove[0].turn = 0;
     allMove[0].color = WHITE;
     allMove[0].m = { { -1, -1 }, { -1, -1 }, { -1, -1 } };
-    currMove = allMove;
-    return 0;
+    currTurn = 0;
+    return 0; /*}}}*/
 }
 
 void loadImgs()
 {
-    board.Load("./data/board.png");
+    board.Load("./data/board.png"); /*{{{*/
     board.Init();
     white.Load("./data/white.png");
     black.Load("./data/black.png");
@@ -339,35 +338,39 @@ void loadImgs()
     //buttons
     start.Load("./data/start-0.png", 0);
     start.Load("./data/start-1.png", 1);
-    start.SetPos(870, 10);
+    start.SetPos(890, 10);
     save.Load("./data/save-0.png", 0);
     save.Load("./data/save-1.png", 1);
-    save.SetPos(870, 10 + PIECE);
+    save.SetPos(890, 10 + PIECE);
     load.Load("./data/load-0.png", 0);
     load.Load("./data/load-1.png", 1);
-    load.SetPos(870, 10 + 2 * PIECE);
+    load.SetPos(890, 10 + 2 * PIECE);
+    abortGame.Load("./data/abort-0.png", 0);
+    abortGame.Load("./data/abort-1.png", 1);
+    abortGame.SetPos(890, 10 + 3 * PIECE);
+    abortGame.enable = false;
     exitGame.Load("./data/exit-0.png", 0);
     exitGame.Load("./data/exit-1.png", 1);
-    exitGame.SetPos(870, 10 + 3 * PIECE);
+    exitGame.SetPos(890, 10 + 4 * PIECE);
     background.Load("./data/background.png");
     //replay
     replay_start.Load("./data/replay_start-0.png", 0);
     replay_start.Load("./data/replay_start-1.png", 1);
-    replay_start.SetPos(805, 20 + 4 * PIECE);
+    replay_start.SetPos(805, 20 + 5 * PIECE);
     replay_start.SetWH(141, 137);
     replay_back.Load("./data/replay_back-0.png", 0);
     replay_back.Load("./data/replay_back-1.png", 1);
-    replay_back.SetPos(946, 20 + 4 * PIECE);
+    replay_back.SetPos(946, 20 + 5 * PIECE);
     replay_back.SetWH(113, 142);
     replay_forward.Load("./data/replay_forward-0.png", 0);
     replay_forward.Load("./data/replay_forward-1.png", 1);
-    replay_forward.SetPos(1059, 10 + 4 * PIECE + 10);
+    replay_forward.SetPos(1059, 10 + 5 * PIECE + 10);
     replay_forward.SetWH(113, 142);
     replay_end.Load("./data/replay_end-0.png", 0);
     replay_end.Load("./data/replay_end-1.png", 1);
-    replay_end.SetPos(1172, 20 + 4 * PIECE);
+    replay_end.SetPos(1172, 20 + 5 * PIECE);
     replay_end.SetWH(141, 137);
-    replay_end.show = replay_start.show = replay_back.show = replay_forward.show = false;
+    replay_end.show = replay_start.show = replay_back.show = replay_forward.show = false; /*}}}*/
 }
 
 void close()
@@ -377,10 +380,55 @@ void close()
     SDL_Quit();
 }
 
+//save and load func
+int saveToFile(const char* filename)
+{ /*{{{*/
+    FILE* fp;
+    fp = fopen(filename, "w");
+    if (fp == NULL)
+        return -1;
+    fprintf(fp, "%d:%d:", myColor, currTurn);
+    struct t* temp;
+    for (int i = 0; i < currTurn; i++) {
+        temp = allMove + i + 1;
+        fprintf(fp, "%d:%d:%d:%d:%d:%d:",
+            temp->m.from.x, temp->m.from.y,
+            temp->m.to.x, temp->m.to.y,
+            temp->m.block.x, temp->m.block.y);
+    }
+    return 0;
+} /*}}}*/
+int loadFromFile(const char* filename)
+{ /*{{{*/
+    FILE* fp;
+    fp = fopen(filename, "r");
+    if (fp == NULL)
+        return -1;
+    board.Init();
+    allMove[0] = { 2, { { -1, -2 }, { -1, -1 }, { -1, -1 } } };
+    fscanf(fp, "%d:%d:", &myColor, &currTurn);
+    botColor = (BoardStat)(3 - myColor);
+    for (int i = 0; i < currTurn; i++) {
+        fscanf(fp, "%d:%d:%d:%d:%d:%d:", &allMove[i + 1].m.from.x, &allMove[i + 1].m.from.y,
+            &allMove[i + 1].m.to.x, &allMove[i + 1].m.to.y,
+            &allMove[i + 1].m.block.x, &allMove[i + 1].m.block.y);
+        allMove[i + 1].color = (3 - allMove[i].color);
+        board.move(allMove[i + 1].m, (BoardStat)allMove[i + 1].color);
+        printf("load:line %d, move %d %d, %d %d, %d %d\n",
+            i, allMove[i + 1].m.from.x, allMove[i + 1].m.from.y,
+            allMove[i + 1].m.to.x, allMove[i + 1].m.to.y,
+            allMove[i + 1].m.block.x, allMove[i + 1].m.block.y);
+    }
+    start.enable = false;
+    return 0;
+} /*}}}*/
+
+//handle when button is pressed
 void buttons()
-{
+{ /*{{{*/
     if (start.isClicked) {
         start.enable = false;
+        abortGame.enable = true;
         start.SetTexture(1);
         //give random color
         srand(time(0));
@@ -395,51 +443,86 @@ void buttons()
         start.isClicked = false;
     }
     if (save.isClicked) {
+        saveToFile(".temp.Amazons.save.file");
         save.isClicked = false;
     }
     if (load.isClicked) {
+        loadFromFile(".temp.Amazons.save.file");
         load.isClicked = false;
     }
+    if (abortGame.isClicked) {
+        winner(botColor);
+        abortGame.isClicked = false;
+    }
     if (exitGame.isClicked) {
-        close();
         exit(0);
     }
     if (board.enable == false) {
+        if (replay_start.isClicked) {
+            board.Init();
+            currTurn = 0;
+            replay_start.isClicked = false;
+        }
+        if (replay_end.isClicked) {
+            currTurn = 0;
+            while (currTurn < allTurns) {
+                currTurn++;
+                board.move(allMove[currTurn].m, (BoardStat)allMove[currTurn].color);
+            }
+            replay_end.isClicked = false;
+        }
+        if (replay_back.isClicked) {
+            if (currTurn > 0) {
+                board.undoMove(allMove[currTurn].m, (BoardStat)allMove[currTurn].color);
+                currTurn--;
+            }
+            replay_back.isClicked = false;
+        }
+        if (replay_forward.isClicked) {
+            if (currTurn < allTurns) {
+                currTurn++;
+                board.move(allMove[currTurn].m, (BoardStat)allMove[currTurn].color);
+            }
+            replay_forward.isClicked = false;
+        }
     }
     return;
-}
+} /*}}}*/
 
 //cal() call ai to calculate
 int cal(void*)
-{
+{ /*{{{*/
     board.enable = false;
     save.enable = false;
     load.enable = false;
     exitGame.enable = false;
     MOVE m;
-    int** boardCopy = board.getState();
+    board.getState(boardCopy);
     m = bot(boardCopy, (int)botColor, (int)myColor);
-    allMove[currMove->turn + 1].m = m;
-    allMove[currMove->turn + 1].color = botColor;
-    allMove[currMove->turn + 1].turn = currMove->turn + 1;
-    currMove = allMove + currMove->turn + 1;
-    free(boardCopy);
+    allMove[currTurn + 1].m = m;
+    allMove[currTurn + 1].color = botColor;
+    currTurn++;
     board.move(m, botColor);
     printf("Bot's move:%d %d; %d %d; %d %d\n", m.from.x, m.from.y, m.to.x, m.to.y, m.block.x, m.block.y);
-    boardCopy = board.getState();
+    board.getState(boardCopy);
     if (judge_is_over(boardCopy, (int)myColor)) {
         winner(botColor);
+        exitGame.enable = true;
+        load.enable = false;
+        save.enable = false;
+        board.enable = false;
+    } else {
+        exitGame.enable = true;
+        load.enable = true;
+        save.enable = true;
+        board.enable = true;
     }
-    free(boardCopy);
-    exitGame.enable = true;
-    load.enable = true;
-    save.enable = true;
-    board.enable = true;
     return 0;
-}
+} /*}}}*/
 
+//when game is over or abort is clicked
 void winner(BoardStat color)
-{
+{ /*{{{*/
     if (color == myColor) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Winner", "You win", window);
     } else {
@@ -447,9 +530,12 @@ void winner(BoardStat color)
     }
     save.enable = false;
     load.enable = false;
+    abortGame.enable = false;
     board.enable = false;
     replay_end.show = replay_start.show = replay_back.show = replay_forward.show = true;
-}
+    allTurns = currTurn;
+    printf("winner:%d,allTurns:%d\n", color, allTurns);
+} /*}}}*/
 
 int main(int, char**)
 {
@@ -474,6 +560,7 @@ int main(int, char**)
                 start.HandleEvent(&e);
                 save.HandleEvent(&e);
                 load.HandleEvent(&e);
+                abortGame.HandleEvent(&e);
                 exitGame.HandleEvent(&e);
                 replay_end.HandleEvent(&e);
                 replay_start.HandleEvent(&e);
@@ -488,6 +575,7 @@ int main(int, char**)
         start.Render();
         save.Render();
         load.Render();
+        abortGame.Render();
         exitGame.Render();
         board.Render();
         replay_end.Render();
@@ -498,6 +586,5 @@ int main(int, char**)
         SDL_RenderPresent(renderer);
     }
     SDL_WaitThread(calthread, NULL);
-    close();
     return 0;
 }
